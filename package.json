@@ -1,0 +1,39 @@
+{
+ "name": "esp8266-modem-simulator",
+ "version": "1.0.0",
+ "description": "Simulador de modem AT em TypeScript/Node.js com interfaces PIPE e WebSocket",
+ "main": "dist/index.js",
+ "scripts": {
+  "build": "tsc",
+  "start": "node dist/index.js",
+  "start:pipe": "node dist/index.js pipe",
+  "start:websocket": "node dist/index.js websocket",
+  "start:serial": "node dist/index.js serial",
+  "dev": "ts-node src/index.ts",
+  "dev:pipe": "ts-node src/index.ts pipe",
+  "dev:websocket": "ts-node src/index.ts websocket",
+  "dev:serial": "ts-node src/index.ts serial",
+  "test": "echo \"Error: no test specified\" && exit 1"
+ },
+ "keywords": [
+  "at",
+  "modem",
+  "simulator",
+  "esp8266",
+  "wifi",
+  "tcp",
+  "websocket"
+ ],
+ "author": "Ricardo JL Rufino",
+ "license": "MIT",
+ "dependencies": {
+  "serialport": "^13.0.0",
+  "socket.io": "^4.7.2"
+ },
+ "devDependencies": {
+  "@types/node": "^20.5.0",
+  "ts-node": "^10.9.1",
+  "typescript": "^5.1.6"
+ },
+ "packageManager": "yarn@1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610"
+}
