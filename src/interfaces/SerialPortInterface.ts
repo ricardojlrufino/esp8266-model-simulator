@@ -8,6 +8,7 @@ export class SerialPortInterface {
   private parser: ReadlineParser | null = null;
   private portPath: string;
   private baudRate: number;
+  private waitingForData: boolean = false;
 
   constructor(modem: ATModemSimulator, portPath: string, baudRate: number = 115200) {
     this.modem = modem;
@@ -56,7 +57,16 @@ export class SerialPortInterface {
   private setupEventHandlers(): void {
     if (!this.serialPort || !this.parser) return;
 
+    this.waitingForData = false;
+
     this.parser.on('data', async (data: string) => {
+      if (this.waitingForData){
+        if(data.includes("AT+CIPSEND")){
+          this.waitingForData = false;
+        }else{
+          return;
+        }
+      } 
       const response = await this.modem.processCommand(data + '\n');
       if (response && this.serialPort) {
         this.serialPort.write(response);
@@ -70,17 +80,23 @@ export class SerialPortInterface {
     });
 
     this.modem.on('waitingForData', (linkId: number, size: number) => {
+      console.error("waitingForData (%d,%d)", linkId, size);
+      this.waitingForData = true;
       if (this.serialPort) {
-        this.serialPort.write(`> `);
-        
         let dataBuffer = '';
         const onData = (data: Buffer) => {
           dataBuffer += data.toString();
-          if (dataBuffer.length >= size || dataBuffer.includes('\r\n')) {
+
+          if (dataBuffer.length >= size) {
+            console.error("waitingForData (DONE)", dataBuffer);
             this.serialPort?.removeListener('data', onData);
-            const finalData = dataBuffer.replace('\r\n', '').substring(0, size);
-            this.modem.sendData(linkId, finalData);
+            const finalData = dataBuffer.substring(0, size);
+            const resp = this.modem.handlePendingSend(linkId, finalData);
+            if (resp) {
+              this.serialPort?.write(resp);
+            }
           }
+
         };
         this.serialPort.on('data', onData);
       }

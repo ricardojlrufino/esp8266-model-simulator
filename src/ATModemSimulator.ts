@@ -30,10 +30,13 @@ export class ATModemSimulator extends EventEmitter {
 
   public async processCommand(data: string): Promise<string | null> {
     // Se estamos aguardando dados para CIPSEND
+
+    if (data && data.includes("html")){
+      debugger;
+    } 
+
     if (this.state.pendingSend && this.state.pendingSend.received < this.state.pendingSend.pkgSize) {
-      const resp = this.handleDataReceive(data);
-      if (resp) console.error("CIPSEND response:\r\n", resp);
-      return resp;
+      return null;
     }
 
     this.commandBuffer += data;
@@ -336,7 +339,11 @@ export class ATModemSimulator extends EventEmitter {
             buffer: ''
           };
         }
-        response = 'OK\r\n>\r\n';
+
+        this.emit('waitingForData', linkId, size); // trigger handlePendingSend after serial buffer full
+        this.emit('data','OK\r\n>\r\n');
+        response = '';
+
       } else {
         console.error("ERROR: No connection at linkId:" + linkId);
       }
@@ -515,7 +522,7 @@ export class ATModemSimulator extends EventEmitter {
     }
   }
 
-  private handleDataReceive(data: string): string | null {
+  public handlePendingSend(linkid: number, data: string): string | null {
     if (!this.state.pendingSend) {
       return null;
     }
