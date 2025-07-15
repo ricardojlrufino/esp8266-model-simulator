@@ -29,16 +29,6 @@ export class ATModemSimulator extends EventEmitter {
   }
 
   public async processCommand(data: string): Promise<string | null> {
-    // Se estamos aguardando dados para CIPSEND
-
-    if (data && data.includes("html")){
-      debugger;
-    } 
-
-    if (this.state.pendingSend && this.state.pendingSend.received < this.state.pendingSend.pkgSize) {
-      return null;
-    }
-
     this.commandBuffer += data;
     let responses: string[] = [];
 
@@ -522,66 +512,33 @@ export class ATModemSimulator extends EventEmitter {
     }
   }
 
-  public handlePendingSend(linkid: number, data: string): string | null {
+  public handlePendingSend(linkId: number, data: string): string | null {
     if (!this.state.pendingSend) {
       return null;
     }
 
     const pending = this.state.pendingSend;
-    // const remainingBytes = pending.size - pending.received;
-    // const dataToReceive = data;
-    // // const dataToReceive = data.slice(0, remainingBytes);
     
-    // // Acumula os dados no buffer
-    // pending.buffer += dataToReceive;
-    // pending.received += dataToReceive.length;
+    console.error("CIPSEND - Received data [length:%d, expected:%d]:\r\n%s", 
+      data.length, pending.pkgSize, data);
 
-    // const dataToReceive = data.slice(0, pending.size); // 32 bytes
-    // pending.received += dataToReceive.length;
-    // pending.buffer = dataToReceive;
+    // Store the complete data (SerialPortInterface already handles size limits)
+    pending.buffer = data;
+    pending.received = data.length;
 
-    // const available = this.state.pendingSend.serialAvailable - this.state.pendingSend.serialRead;
-    // const readLenght = data.length; // this data has splited by ReadLine on serial port.
-
-    const remaining = this.state.pendingSend.pkgSize - this.state.pendingSend.received;
-    console.error("CIPSEND - Received data [length:%d, read:%d, remaining:%d]:\r\n%s", data.length, this.state.pendingSend.received, remaining, data);
-
-    const dataToReceive = data.substring(0, Math.min(remaining, data.length)); 
-    pending.received += dataToReceive.length;
-    pending.buffer += dataToReceive;
-
-    if (this.state.pendingSend.received >= this.state.pendingSend.pkgSize){
-      return `Recv ${this.state.pendingSend.pkgSize} bytes\r\n\r\nSEND OK\r\n\r\n`;
-    } else{
-      return null; // read next line from serial...
+    // Send data to TCP connection
+    if (this.state.connections[linkId]) {
+      this.state.connections[linkId].write(data, (err) => {
+        if (!err) {
+          console.error("Send to TCP Client:\n", data.trim());
+        }
+      });
     }
 
+    // Clear pending send state
+    this.state.pendingSend = undefined;
 
-    // Se recebemos todos os dados, envia para a conexão TCP
-    if (pending.received >= pending.pkgSize) {
-
-      if (this.state.connections[pending.linkId]) {
-
-        this.state.connections[pending.linkId].write(pending.buffer, (err => {
-            if(!err){
-              console.error("Send to TCP Client (on flush):\n", pending.buffer.trim());
-              this.emit('data', `Recv ${pending.pkgSize} bytes\r\n\r\nSEND OK\r\n\r\n`);
-            }
-        }));
-      }
-      this.state.pendingSend = undefined;
-    }
-
-    // Se ainda há dados sobrando no buffer que não cabem no CIPSEND atual
-    if (data.length > dataToReceive.length) {
-      // Retorna os dados restantes para serem processados como comandos
-      const remainingData = data.slice(dataToReceive.length);
-      setTimeout(() => {
-        this.processCommand(remainingData);
-      }, 0);
-    }
-
-    return '';
+    return `Recv ${data.length} bytes\r\n\r\nSEND OK\r\n\r\n`;
   }
 
   public sendData(linkId: number, data: string): void {

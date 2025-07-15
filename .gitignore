@@ -1,3 +1,5 @@
 node_modules/
 ./claude
 dist/
+path/to/venv/
+.venv/

@@ -1,14 +1,16 @@
 import { SerialPort } from 'serialport';
-import { ReadlineParser } from '@serialport/parser-readline';
 import { ATModemSimulator } from '../ATModemSimulator';
 
 export class SerialPortInterface {
   private modem: ATModemSimulator;
   private serialPort: SerialPort | null = null;
-  private parser: ReadlineParser | null = null;
   private portPath: string;
   private baudRate: number;
-  private waitingForData: boolean = false;
+  private rawDataMode: boolean = false;
+  private rawDataBuffer: Buffer = Buffer.alloc(0);
+  private expectedDataSize: number = 0;
+  private currentLinkId: number = 0;
+  private commandBuffer: Buffer = Buffer.alloc(0);
 
   constructor(modem: ATModemSimulator, portPath: string, baudRate: number = 115200) {
     this.modem = modem;
@@ -24,8 +26,6 @@ export class SerialPortInterface {
         autoOpen: false
       });
 
-      this.parser = this.serialPort.pipe(new ReadlineParser({ delimiter: '\n' }));
-      
       await this.openPort();
       this.setupEventHandlers();
       
@@ -55,21 +55,16 @@ export class SerialPortInterface {
   }
 
   private setupEventHandlers(): void {
-    if (!this.serialPort || !this.parser) return;
 
-    this.waitingForData = false;
+    if (!this.serialPort) return;
 
-    this.parser.on('data', async (data: string) => {
-      if (this.waitingForData){
-        if(data.includes("AT+CIPSEND")){
-          this.waitingForData = false;
-        }else{
-          return;
-        }
-      } 
-      const response = await this.modem.processCommand(data + '\n');
-      if (response && this.serialPort) {
-        this.serialPort.write(response);
+    // Single handler for all serial data
+    this.serialPort.on('data', (data: Buffer) => {
+      console.error("Serial data received: %d bytes, rawMode: %s", data.length, this.rawDataMode);
+      if (this.rawDataMode) {
+        this.handleRawData(data);
+      } else {
+        this.handleCommandData(data);
       }
     });
 
@@ -81,25 +76,7 @@ export class SerialPortInterface {
 
     this.modem.on('waitingForData', (linkId: number, size: number) => {
       console.error("waitingForData (%d,%d)", linkId, size);
-      this.waitingForData = true;
-      if (this.serialPort) {
-        let dataBuffer = '';
-        const onData = (data: Buffer) => {
-          dataBuffer += data.toString();
-
-          if (dataBuffer.length >= size) {
-            console.error("waitingForData (DONE)", dataBuffer);
-            this.serialPort?.removeListener('data', onData);
-            const finalData = dataBuffer.substring(0, size);
-            const resp = this.modem.handlePendingSend(linkId, finalData);
-            if (resp) {
-              this.serialPort?.write(resp);
-            }
-          }
-
-        };
-        this.serialPort.on('data', onData);
-      }
+      this.startRawDataMode(linkId, size);
     });
 
     this.serialPort.on('error', (error) => {
@@ -109,6 +86,78 @@ export class SerialPortInterface {
     this.serialPort.on('close', () => {
       console.log('Serial port closed');
     });
+  }
+
+  private async handleCommandData(data: Buffer): Promise<void> {
+    this.commandBuffer = Buffer.concat([this.commandBuffer, data]);
+    
+    // Look for complete lines ending with \n
+    const bufferStr = this.commandBuffer.toString();
+    const lines = bufferStr.split('\n');
+    
+    // Keep the last incomplete line in the buffer
+    this.commandBuffer = Buffer.from(lines.pop() || '');
+    
+    // Process complete lines
+    for (const line of lines) {
+      if (line.trim()) {
+        console.error("Processing command: %s", line.trim());
+        const response = await this.modem.processCommand(line + '\n');
+        if (response && this.serialPort) {
+          this.serialPort.write(response);
+        }
+      }
+    }
+  }
+
+  private startRawDataMode(linkId: number, size: number): void {
+    console.error("Starting raw data mode for linkId %d, expecting %d bytes", linkId, size);
+    this.rawDataMode = true;
+    this.currentLinkId = linkId;
+    this.expectedDataSize = size;
+    this.rawDataBuffer = Buffer.alloc(0);
+  }
+
+  private handleRawData(data: Buffer): void {
+
+    this.rawDataBuffer = Buffer.concat([this.rawDataBuffer, data]);
+    
+    console.error("Raw data received: %d bytes, total: %d/%d", 
+      data.length, 
+      this.rawDataBuffer.length, 
+      this.expectedDataSize
+    );
+
+    if (this.rawDataBuffer.length >= this.expectedDataSize) {
+      // Got all expected data
+      const finalData = this.rawDataBuffer.subarray(0, this.expectedDataSize).toString();
+      const remainingData = this.rawDataBuffer.subarray(this.expectedDataSize);
+      
+      console.error("Raw data complete, processing %d bytes", finalData.length);
+      
+      // Process the complete data packet
+      const resp = this.modem.handlePendingSend(this.currentLinkId, finalData);
+      if (resp && this.serialPort) {
+        this.serialPort.write(resp);
+      }
+      
+      // Exit raw mode 
+      console.error("Exiting raw data mode");
+      this.rawDataMode = false;
+      this.rawDataBuffer = Buffer.alloc(0);
+      
+      // Process any remaining data as commands if present
+      if (remainingData.length > 0) {
+        setTimeout(() => {
+          this.processRemainingData(remainingData);
+        }, 0);
+      }
+    }
+  }
+
+  private async processRemainingData(data: Buffer): Promise<void> {
+    // Process remaining data as commands using the same handler
+    await this.handleCommandData(data);
   }
 
   public stop(): void {
