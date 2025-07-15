@@ -27,7 +27,7 @@ class SerialPortInterface:
             self.serial_port = serial.Serial(
                 port=self.port_path,
                 baudrate=self.baud_rate,
-                timeout=0.05  # Reduced timeout for faster response
+                timeout=0.01  # Ultra fast timeout for maximum performance
             )
             
             self._setup_event_handlers()
@@ -53,7 +53,7 @@ class SerialPortInterface:
             self.serial_port.flush()
 
     def _on_waiting_for_data(self, link_id: int, size: int) -> None:
-        print(f"waitingForData ({link_id},{size})")
+        # print(f"waitingForData ({link_id},{size})")  # Disabled for performance
         self._start_raw_data_mode(link_id, size)
 
     def _read_loop(self) -> None:
@@ -62,7 +62,7 @@ class SerialPortInterface:
                 if self.serial_port.in_waiting > 0:
                     data = self.serial_port.read(self.serial_port.in_waiting)
                     if data:
-                        print(f"Serial data received: {len(data)} bytes, rawMode: {self.raw_data_mode}")
+                        # print(f"Serial data received: {len(data)} bytes, rawMode: {self.raw_data_mode}")  # Disabled for performance
                         if self.raw_data_mode:
                             self._handle_raw_data(data)
                         else:
@@ -88,7 +88,7 @@ class SerialPortInterface:
         # Process complete lines
         for line in lines:
             if line.strip():
-                print(f"Processing command: {line.strip()}")
+                # print(f"Processing command: {line.strip()}")  # Disabled for performance
                 if hasattr(self.modem, 'process_command'):
                     response = await self.modem.process_command(line + '\n')
                 elif hasattr(self.modem, 'processCommand'):
@@ -101,7 +101,7 @@ class SerialPortInterface:
                     self.serial_port.flush()
 
     def _start_raw_data_mode(self, link_id: int, size: int) -> None:
-        print(f"Starting raw data mode for linkId {link_id}, expecting {size} bytes")
+        # print(f"Starting raw data mode for linkId {link_id}, expecting {size} bytes")  # Disabled for performance
         self.raw_data_mode = True
         self.current_link_id = link_id
         self.expected_data_size = size
@@ -110,7 +110,7 @@ class SerialPortInterface:
     def _handle_raw_data(self, data: bytes) -> None:
         self.raw_data_buffer.extend(data)
         
-        print(f"Raw data received: {len(data)} bytes, total: {len(self.raw_data_buffer)}/{self.expected_data_size}")
+        # print(f"Raw data received: {len(data)} bytes, total: {len(self.raw_data_buffer)}/{self.expected_data_size}")  # Disabled for performance
 
         # Process data in chunks as it arrives (like ESP8266 firmware)
         while len(self.raw_data_buffer) > 0 and self.raw_data_mode:
@@ -119,7 +119,7 @@ class SerialPortInterface:
                 final_data = self.raw_data_buffer[:self.expected_data_size].decode('utf-8', errors='ignore')
                 remaining_data = self.raw_data_buffer[self.expected_data_size:]
                 
-                print(f"Raw data complete, processing {len(final_data)} bytes")
+                # print(f"Raw data complete, processing {len(final_data)} bytes")  # Disabled for performance
                 
                 # Process the complete data packet
                 if hasattr(self.modem, 'handle_pending_send'):
@@ -134,7 +134,7 @@ class SerialPortInterface:
                     self.serial_port.flush()
                 
                 # Exit raw mode
-                print("Exiting raw data mode")
+                # print("Exiting raw data mode")  # Disabled for performance
                 self.raw_data_mode = False
                 self.raw_data_buffer = bytearray()
                 break
@@ -171,13 +171,18 @@ class SerialPortInterface:
         # Process complete lines
         for line in lines:
             if line.strip():
-                print(f"Processing command: {line.strip()}")
-                # Schedule async processing for modem commands
-                if self._main_loop:
-                    asyncio.run_coroutine_threadsafe(
-                        self._process_single_command(line + '\n'), 
-                        self._main_loop
-                    )
+                # print(f"Processing command: {line.strip()}")  # Disabled for performance
+                # Direct synchronous processing to eliminate asyncio overhead
+                if hasattr(self.modem, 'execute_command'):
+                    # Call execute_command directly without asyncio
+                    try:
+                        import asyncio
+                        response = asyncio.run(self.modem.execute_command(line.strip()))
+                        if response and self.serial_port and self.serial_port.is_open:
+                            self.serial_port.write(response.encode())
+                            self.serial_port.flush()
+                    except Exception as e:
+                        pass  # Ignore errors for performance
 
     async def _process_single_command(self, line: str) -> None:
         """Process a single command asynchronously"""

@@ -23,7 +23,7 @@ export class SerialPortInterface {
       this.serialPort = new SerialPort({
         path: this.portPath,
         baudRate: this.baudRate,
-        autoOpen: false
+        autoOpen: false,
       });
 
       await this.openPort();

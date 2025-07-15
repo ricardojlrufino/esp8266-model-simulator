@@ -79,7 +79,7 @@ class ATModemSimulator:
         return ''.join(responses) if responses else None
 
     async def execute_command(self, cmd: str) -> str:
-        print(f"Executing command: {cmd}")
+        # print(f"Executing command: {cmd}")  # Disabled for performance
         
         response = '\r\n\r\nERROR\r\n'
 
@@ -232,12 +232,16 @@ class ATModemSimulator:
 
         # Connection status
         elif cmd == 'AT+CIPSTATUS':
-            if len(self.state.connections) > 0:
-                response = "STATUS:3\r\n"
+            if len(self.state.connections) > 0 and any(conn for conn in self.state.connections):
+                response = "\r\nSTATUS:3\r\n"
+                # Show actual connections
+                for i, conn in enumerate(self.state.connections):
+                    if conn:
+                        response += f'+CIPSTATUS:{i},"TCP","192.168.0.31",53116,2000,1\r\n'
             else:
-                response = "STATUS:2\r\n"
+                response = "\r\nSTATUS:2\r\n"
             
-            response += '+CIPSTATUS:0,"TCP","192.168.0.31",38922,2000,1\r\n' + 'OK\r\n'
+            response += '\r\nOK\r\n'
 
         # Configure AT Commands Echoing
         elif cmd in ['ATE0', 'ATE1']:
@@ -250,7 +254,7 @@ class ATModemSimulator:
         # Obtain Socket Data Length in Passive Receiving Mode
         elif cmd.startswith('AT+CIPRECVLEN?'):
             length = self.state.pending_receive.size if self.state.pending_receive else 0
-            response = f'+CIPRECVLEN:{length},0,0,0,0 \r\nOK\r\n'
+            response = f'\r\n+CIPRECVLEN:{length},0,0,0,0\r\n\r\nOK\r\n'
 
         # Obtain Socket Data in Passive Receiving Mode
         elif cmd.startswith('AT+CIPRECVDATA='):
@@ -265,8 +269,8 @@ class ATModemSimulator:
                     data_to_send = available_data[:actual_len]
                     remaining_data = available_data[actual_len:]
 
-                    response = (f'\r\n+CIPRECVDATA,{actual_len}:{data_to_send}\r\n' +
-                              'OK\r\n')
+                    response = (f'\r\n\r\n+CIPRECVDATA,{actual_len}:{data_to_send}\r\n' +
+                              '\r\nOK\r\n')
 
                     print(f"Send [{actual_len}] {data_to_send}")
 
@@ -319,16 +323,16 @@ class ATModemSimulator:
                         )
 
                     self.emit('waitingForData', link_id, size)
-                    response = '\r\n\r\nOK\r\n>\r\n'  # ESP8266 AT 1.7 format
-                else:
-                    print(f"ERROR: No connection at linkId: {link_id}")
+                    response = '\r\n\r\nOK\r\n> '
+ #               else:
+                    # print(f"ERROR: No connection at linkId: {link_id}")  # Disabled for performance
             except (ValueError, IndexError):
                 pass
 
         # Close connection
         elif cmd.startswith('AT+CIPCLOSE='):
             try:
-                print("Received command CLOSE, write buffer if exist")
+                # print("Received command CLOSE, write buffer if exist")  # Disabled for performance
                 link_id = int(cmd.split('=')[1])
                 if link_id < len(self.state.connections) and self.state.connections[link_id]:
                     if self.state.pending_send:
@@ -350,8 +354,8 @@ class ATModemSimulator:
             except (ValueError, IndexError):
                 pass
 
-        if response:
-            print(f"Command Response:\r\n{response}")
+        # if response:
+        #     print(f"Command Response:\r\n{response}")  # Disabled for performance
 
         return response
 
@@ -397,7 +401,7 @@ class ATModemSimulator:
     def _server_loop(self):
         while self._running and self.tcp_server:
             try:
-                self.tcp_server.settimeout(1.0)
+                self.tcp_server.settimeout(0.1)  # Faster timeout
                 client_socket, address = self.tcp_server.accept()
                 
                 # Find free slot for connection
@@ -434,16 +438,16 @@ class ATModemSimulator:
         try:
             while self._running:
                 try:
-                    client_socket.settimeout(1.0)
+                    client_socket.settimeout(0.1)  # Faster timeout
                     data = client_socket.recv(1024)
                     if not data:
                         # Client disconnected gracefully
-                        print(f"Client {link_id} disconnected")
+                        # print(f"Client {link_id} disconnected")  # Disabled for performance
                         break
                     
                     send_later = True
                     if send_later:
-                        print(f"TCPSocket Received ({len(data)}):\r\n{data.decode()}")
+                        # print(f"TCPSocket Received ({len(data)}):\r\n{data.decode()}")  # Disabled for performance
                         self.emit('data', f'+IPD,{link_id},{len(data)}\r\n')
                         
                         if not self.state.pending_receive:
@@ -452,26 +456,26 @@ class ATModemSimulator:
                                 size=len(data),
                                 buffer=data.decode()
                             )
-                        else:
-                            print("WARNING... pendingReceive and has new request. This may be a bug")
+ #                       else:
+                            # print("WARNING... pendingReceive and has new request. This may be a bug")  # Disabled for performance
                     else:
                         response = f'+IPD,{link_id},{len(data)}:{data.decode()}\r\n'
                         self.emit('data', response)
-                        print(f"Socket Received ({len(data)}): {data.decode()}")
-                        print(f"Send Response: {response}")
+                        # print(f"Socket Received ({len(data)}): {data.decode()}")
+                        # print(f"Send Response: {response}")  # Disabled for performance
                         
                 except socket.timeout:
                     # Timeout is normal, continue the loop
                     continue
                 except ConnectionResetError:
-                    print(f"Client {link_id} reset connection")
+                    # print(f"Client {link_id} reset connection")  # Disabled for performance
                     break
                 except Exception as e:
-                    print(f"Client handler error: {e}")
+                    # print(f"Client handler error: {e}")  # Disabled for performance
                     break
                     
         except Exception as e:
-            print(f"Client handler outer error: {e}")
+            print(f"Client handler outer error: {e}")  # Disabled for performance
         finally:
             if link_id < len(self.state.connections):
                 self.state.connections[link_id] = None
@@ -479,7 +483,7 @@ class ATModemSimulator:
                 client_socket.close()
             except:
                 pass
-            print(f"Connection {link_id} closed...")
+            # print(f"Connection {link_id} closed...")  # Disabled for performance
 
     async def is_port_available(self, port: int) -> bool:
         try:
@@ -518,7 +522,7 @@ class ATModemSimulator:
         pending.buffer += data
         pending.received += len(data)
         
-        print(f"CIPSEND - Received data [length:{len(data)}, read:{pending.received - len(data)}, remaining:{pending.pkg_size - pending.received}]:\r\n{data}")
+        # print(f"CIPSEND - Received data [length:{len(data)}, read:{pending.received - len(data)}, remaining:{pending.pkg_size - pending.received}]:\r\n{data}")  # Disabled for performance
 
         # ESP8266 AT 1.7 behavior: Send data immediately when complete
         if pending.received >= pending.pkg_size:
@@ -526,13 +530,13 @@ class ATModemSimulator:
             if link_id < len(self.state.connections) and self.state.connections[link_id]:
                 try:
                     self.state.connections[link_id].send(pending.buffer.encode())
-                    print(f"Send to TCP Client:\n{pending.buffer.strip()}")
+                    # print(f"Send to TCP Client:\n{pending.buffer.strip()}")  # Disabled for performance
                 except Exception as e:
-                    print(f"Error sending data: {e}")
+                    print(f"Error sending data: {e}")  # Disabled for performance
 
             # Clear pending send state and respond immediately
             self.state.pending_send = None
-            return f'Recv {pending.pkg_size} bytes\r\n\r\nSEND OK\r\n\r\n'
+            return f'\r\nRecv {pending.pkg_size} bytes\r\n\r\nSEND OK\r\n'
         
         # Still accumulating data - no delay, just wait for more
         return None

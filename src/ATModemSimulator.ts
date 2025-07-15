@@ -217,15 +217,19 @@ export class ATModemSimulator extends EventEmitter {
     // +CIPSTATUS:<link ID>,<type>,<remote IP>,<remote port>,<local port>,<tetype>
     // https://docs.espressif.com/projects/esp-at/en/release-v2.1.0.0_esp32s2/AT_Command_Set/TCP-IP_AT_Commands.html#cmd-STATUS
     else if (cmd === 'AT+CIPSTATUS') {
-
-      if(this.state.connections.length > 0){
-        response = "STATUS:3\r\n"
-      }else{
-        response = "STATUS:2\r\n"
+      if (this.state.connections.length > 0 && this.state.connections.some(conn => conn)) {
+        response = "\r\nSTATUS:3\r\n";
+        // Show actual connections
+        for (let i = 0; i < this.state.connections.length; i++) {
+          if (this.state.connections[i]) {
+            response += `+CIPSTATUS:${i},"TCP","192.168.0.31",53116,2000,1\r\n`;
+          }
+        }
+      } else {
+        response = "\r\nSTATUS:2\r\n";
       }
-
-      response += '+CIPSTATUS:0,"TCP","192.168.0.31",38922,2000,1\r\n'+
-        'OK\r\n';
+      
+      response += '\r\nOK\r\n';
     }
 
     // Configure AT Commands Echoing
@@ -242,11 +246,8 @@ export class ATModemSimulator extends EventEmitter {
     
       // Obtain Socket Data Length in Passive Receiving Mode
     else if (cmd.startsWith('AT+CIPRECVLEN?')) {
-
       const len = this.state.pendingReceive?.size || 0;
-
-      response = '+CIPRECVLEN:' + len + ',0,0,0,0 \r\nOK\r\n'; // FIXME: add size for all clients
-      
+      response = `\r\n+CIPRECVLEN:${len},0,0,0,0\r\n\r\nOK\r\n`; // FIXME: add size for all clients
     }
     
     // Obtain Socket Data in Passive Receiving Mode
@@ -262,9 +263,8 @@ export class ATModemSimulator extends EventEmitter {
         const dataToSend = availableData.substring(0, actualLen);
         const remainingData = availableData.substring(actualLen);
 
-        response = '\r\n'+
-            '+CIPRECVDATA,' + actualLen + ':' + dataToSend+  '\r\n'+
-            'OK\r\n'
+        response = `\r\n\r\n+CIPRECVDATA,${actualLen}:${dataToSend}\r\n` +
+                   '\r\nOK\r\n';
 
         // setTimeout(()=>{
         //   this.emit("data", dataToSend + "\r\n");
@@ -331,8 +331,7 @@ export class ATModemSimulator extends EventEmitter {
         }
 
         this.emit('waitingForData', linkId, size); // trigger handlePendingSend after serial buffer full
-        this.emit('data','OK\r\n>\r\n');
-        response = '';
+        response = '\r\n\r\nOK\r\n> ';
 
       } else {
         console.error("ERROR: No connection at linkId:" + linkId);
@@ -538,7 +537,7 @@ export class ATModemSimulator extends EventEmitter {
     // Clear pending send state
     this.state.pendingSend = undefined;
 
-    return `Recv ${data.length} bytes\r\n\r\nSEND OK\r\n\r\n`;
+    return `\r\nRecv ${data.length} bytes\r\n\r\nSEND OK\r\n`;
   }
 
   public sendData(linkId: number, data: string): void {
