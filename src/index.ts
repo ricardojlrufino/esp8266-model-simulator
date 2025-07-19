@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { ATModemSimulator } from './ATModemSimulator';
 import { PipeInterface } from './interfaces/PipeInterface';
 import { WebSocketInterface } from './interfaces/WebSocketInterface';

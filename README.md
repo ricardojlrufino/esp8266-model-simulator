@@ -13,7 +13,7 @@ A comprehensive ESP8266 AT command modem simulator written in TypeScript/Node.js
 - **WiFi connection simulation** with configurable networks
 - **TCP connection management** with up to 4 simultaneous connections
 
-## Installation
+## Installation from Sources
 
 ```bash
 # Clone the repository
@@ -25,6 +25,10 @@ yarn install
 
 # Build the project
 yarn build
+
+# Install as global
+yarn global add file:$PWD
+
 ```
 
 ## Usage
@@ -244,3 +248,20 @@ MIT License - see LICENSE file for details.
 - Ensure commands end with `\r\n`
 - WiFi connection only works with the pre-configured network (`rede1`/`123456`)
 - TCP server requires `CIPMUX=1` to be set first
+
+## Debug
+
+Use socat and tty0tty to debug real esp hardware 
+
+socat -x -v /dev/ttyUSB0,raw,echo=0,b115200 \
+            /dev/tnt0,raw,echo=0,b115200 \
+            2>&1 | tee -a serial_traffic_mqtt.log
+
+Debug simulator
+
+start simulator on /dev/tnt0
+connect websim in /dev/tnt3
+
+socat -x -v /dev/tnt1,raw,echo=0,b115200 \
+            /dev/tnt2,raw,echo=0,b115200 \
+            2>&1 | tee -a serial_traffic_mqtt_simulator.log

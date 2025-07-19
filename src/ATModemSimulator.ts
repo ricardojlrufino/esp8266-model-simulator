@@ -1,14 +1,13 @@
 import { EventEmitter } from 'events';
-import * as net from 'net';
 import { ModemState } from './types';
-import { buffer } from 'stream/consumers';
+import { MAX_CONNECTIONS, TCPManager } from './TCPManager';
+import { Utils } from './Utils';
 
-const MAX_CONNECTIONS = 4;
 
 export class ATModemSimulator extends EventEmitter {
   private state: ModemState;
   private commandBuffer: string = '';
-  private tcpServer: net.Server | null = null;
+  private tcpManager: TCPManager;
 
   constructor() {
     super();
@@ -23,9 +22,11 @@ export class ATModemSimulator extends EventEmitter {
       password: '',
       ip: '127.0.0.1',
       mac: '11:22:33:44:55:66',
-      connections: [],
-      serverSocket: null
+      cipsto: 180
     };
+    
+    this.tcpManager = new TCPManager();
+    this.setupTCPManagerEvents();
   }
 
   public async processCommand(data: string): Promise<string | null> {
@@ -193,7 +194,7 @@ export class ATModemSimulator extends EventEmitter {
       if (newCipServer === 1) {
         this.state.port = newPort;
         try {
-          const serverResult = await this.startTcpServer();
+          const serverResult = await this.tcpManager.startServer(this.state.port);
           if (serverResult) {
             this.state.cipServer = newCipServer;
             response = 'OK\r\n';
@@ -207,7 +208,7 @@ export class ATModemSimulator extends EventEmitter {
           response = 'ERROR\r\n';
         }
       } else {
-        this.stopTcpServer();
+        this.tcpManager.stopServer();
         this.state.cipServer = 0;
         response = 'OK\r\n';
       }
@@ -217,13 +218,16 @@ export class ATModemSimulator extends EventEmitter {
     // +CIPSTATUS:<link ID>,<type>,<remote IP>,<remote port>,<local port>,<tetype>
     // https://docs.espressif.com/projects/esp-at/en/release-v2.1.0.0_esp32s2/AT_Command_Set/TCP-IP_AT_Commands.html#cmd-STATUS
     else if (cmd === 'AT+CIPSTATUS') {
-      if (this.state.connections.length > 0 && this.state.connections.some(conn => conn)) {
+      const allConnections = this.tcpManager.getAllConnections();
+      
+      if (allConnections.length > 0) {
         response = "\r\nSTATUS:3\r\n";
-        // Show actual connections
-        for (let i = 0; i < this.state.connections.length; i++) {
-          if (this.state.connections[i]) {
-            response += `+CIPSTATUS:${i},"TCP","192.168.0.31",53116,2000,1\r\n`;
-          }
+        
+        for (const conn of allConnections) {
+          const teType = conn.role === 'server' ? 1 : 0;
+          // Use a random high port number like real ESP8266
+          const localPort = conn.localPort || (20000 + Math.floor(Math.random() * 45000));
+          response += `+CIPSTATUS:${conn.linkId},"${conn.type}","${conn.remoteIP}",${conn.remotePort},${localPort},${teType}\r\n`;
         }
       } else {
         response = "\r\nSTATUS:2\r\n";
@@ -232,56 +236,46 @@ export class ATModemSimulator extends EventEmitter {
       response += '\r\nOK\r\n';
     }
 
-    // Configure AT Commands Echoing
+    // Configure AT Commands Echoing
     else if (cmd === 'ATE0' || cmd === 'ATE1') {
       response = 'OK\r\n';
-    }
+    } 
 
-
-      // Set Socket Receiving Mode
-      // 1: passive mode. ESP-AT will keep the received socket data in an internal buffer
+    // Set Socket Receiving Mode
+    // 1: passive mode. ESP-AT will keep the received socket data in an internal buffer
     else if (cmd.startsWith('AT+CIPRECVMODE=1')) {
       response = 'OK\r\n';
     }
     
-      // Obtain Socket Data Length in Passive Receiving Mode
+    // Obtain Socket Data Length in Passive Receiving Mode
     else if (cmd.startsWith('AT+CIPRECVLEN?')) {
-      const len = this.state.pendingReceive?.size || 0;
-      response = `\r\n+CIPRECVLEN:${len},0,0,0,0\r\n\r\nOK\r\n`; // FIXME: add size for all clients
+      // Show length for all connections
+      let lengths = [];
+      for (let i = 0; i < MAX_CONNECTIONS; i++) {
+        const len = this.tcpManager.getPendingReceiveLength(i);
+        lengths.push(len.toString());
+      }
+      response = `\r\n+CIPRECVLEN:${lengths.join(',')}\r\n\r\nOK\r\n`;
     }
     
-    // Obtain Socket Data in Passive Receiving Mode
+    // Obtain Socket Data in Passive Receiving Mode
+      // response: +CIPRECVDATA:<actual_len>,<data>
     else if (cmd.startsWith('AT+CIPRECVDATA=')) {
-
       const params = cmd.split('=')[1].split(',');
       const linkId = parseInt(params[0]);
       const requestedLen = parseInt(params[1]);
 
-      if (this.state.pendingReceive) {
-        const availableData = this.state.pendingReceive.buffer;
-        const actualLen = Math.min(requestedLen, availableData.length);
-        const dataToSend = availableData.substring(0, actualLen);
-        const remainingData = availableData.substring(actualLen);
-
-        response = `\r\n\r\n+CIPRECVDATA,${actualLen}:${dataToSend}\r\n` +
+      console.error(`DEBUG: CIPRECVDATA request for linkId=${linkId}, requestedLen=${requestedLen}`);
+      console.error(`DEBUG: Connection exists: ${this.tcpManager.hasConnection(linkId)}, Pending length: ${ this.tcpManager.getPendingReceiveLength(linkId) } `);
+      
+      const result = this.tcpManager.getPendingReceiveData(linkId, requestedLen);
+      if (result) {
+        response = `\r\n\r\n+CIPRECVDATA,${result.actualLen}:${result.data}\r\n` +
                    '\r\nOK\r\n';
-
-        // setTimeout(()=>{
-        //   this.emit("data", dataToSend + "\r\n");
-        // },10);
-
-        console.error("Send [%d] %s", actualLen, dataToSend);
-
-        if (remainingData.length > 0) {
-          this.state.pendingReceive.buffer = remainingData;
-          this.state.pendingReceive.size = remainingData.length;
-        } else {
-          this.state.pendingReceive = undefined;
-        }
+        console.error("DEBUG: Send [size: %d]:\r\n%s", result.actualLen, Utils.hexDump(result.data));
       } else {
-        console.error("Send DONE... +CIPRECVDATA:0... ");
+        console.error("Send DONE... Response: +CIPRECVDATA:0... ");
         response = '+CIPRECVDATA:0,192.168.0.2,8080,\r\nOK\r\n';
-
       }
     }
 
@@ -292,9 +286,80 @@ export class ATModemSimulator extends EventEmitter {
 
     // Set server timeout
     else if (cmd.startsWith('AT+CIPSTO=')) {
-      response = 'OK\r\n';
+      const timeoutValue = parseInt(cmd.split('=')[1]);
+      if (timeoutValue >= 0 && timeoutValue <= 7200) {
+        this.state.cipsto = timeoutValue;
+        this.tcpManager.setServerTimeout(timeoutValue);
+        response = '\r\n\r\nOK\r\n';
+      } else {
+        response = '\r\n\r\nERROR\r\n';
+      }
     }
 
+    // Query server timeout
+    else if (cmd === 'AT+CIPSTO?') {
+      response = `\r\n+CIPSTO:${this.state.cipsto}\r\n\r\nOK\r\n`;
+    }
+
+    // Establish TCP/UDP connection
+    else if (cmd.startsWith('AT+CIPSTART=')) {
+      const paramsStr = cmd.split('=')[1];
+      const params = this.tcpManager.parseQuotedParams(paramsStr);
+      
+      if (params.length < 3) {
+        response = '\r\n\r\nERROR\r\n';
+        console.error('Invalid parameters length !');
+      } else {
+        let linkId = 0;
+        let type: string;
+        let remoteIP: string;
+        let remotePort: number;
+        let tcpKeepAlive: number | undefined;
+        let localIP: string | undefined;
+
+        if (this.state.cipMux === 1) {
+          // Multiple connection mode
+          linkId = parseInt(params[0]);
+          type = params[1];
+          remoteIP = params[2];
+          remotePort = parseInt(params[3]);
+          tcpKeepAlive = params[4] ? parseInt(params[4]) : undefined;
+          localIP = params[5];
+        } else {
+          // Single connection mode
+          type = params[0];
+          remoteIP = params[1];
+          remotePort = parseInt(params[2]);
+          tcpKeepAlive = params[3] ? parseInt(params[3]) : undefined;
+          localIP = params[4];
+        }
+
+        // Validate parameters
+        if (linkId < 0 || linkId >= MAX_CONNECTIONS || 
+            !['TCP', 'UDP', 'SSL'].includes(type.toUpperCase()) ||
+            !remoteIP || isNaN(remotePort) || remotePort < 1 || remotePort > 65535) {
+          response = '\r\n\r\nERROR\r\n';
+          console.error("Invalid parameters");
+        } else {
+          // Check if connection already exists
+          if (this.tcpManager.hasConnection(linkId)) {
+            response = '\r\n\r\nALREADY CONNECTED\r\n';
+          } else {
+            try {
+              const connected = await this.tcpManager.establishClientConnection(linkId, type.toUpperCase(), remoteIP, remotePort, tcpKeepAlive, localIP);
+              if (connected) {
+                response = `\r\n${linkId},CONNECT\r\n\r\nOK\r\n`;
+              } else {
+                response = '\r\n\r\nERROR\r\n';
+              }
+            } catch (error) {
+              console.error('Error establishing connection:', error);
+              response = '\r\n\r\nERROR\r\n';
+            }
+          }
+        }
+      }
+    }
 
     // Enviar dados
     else if (cmd.startsWith('AT+CIPSEND=')) {
@@ -310,62 +375,32 @@ export class ATModemSimulator extends EventEmitter {
       }
 
       if (size > 2048){
-        console.error("###### WARING - DATA TRUNCATED AT: 2048 bytes.");
-        console.error("###### WARING - DATA TRUNCATED AT: 2048 bytes.");
-        console.error("###### WARING - DATA TRUNCATED AT: 2048 bytes.");
+        console.error("###### WARNING - DATA TRUNCATED AT: 2048 bytes.");
         size = 2048;
       } 
 
-      if (this.state.connections[linkId]) {
-
-        if (this.state.pendingSend){
-          this.state.pendingSend.pkgSize = size;
-          this.state.pendingSend.received = 0;
-        } else{
-          this.state.pendingSend = {
-            linkId: linkId,
-            pkgSize: size,
-            received: 0,
-            buffer: ''
-          };
-        }
-
-        this.emit('waitingForData', linkId, size); // trigger handlePendingSend after serial buffer full
-        response = '\r\n\r\nOK\r\n> ';
-
+      if (this.tcpManager.hasConnection(linkId)) {
+        this.tcpManager.setPendingSend(linkId, size);
+        this.emit('waitingForData', linkId, size);
+        response = '\r\nOK\r\n> ';
       } else {
         console.error("ERROR: No connection at linkId:" + linkId);
+        response = '\r\n\r\nERROR\r\n';
       }
     }
 
     // Fechar conexão
     else if (cmd.startsWith('AT+CIPCLOSE=')) {
-      console.error("Received comand CLOSE, write buffer if exist")
+      console.error("Received command CLOSE");
       const linkId = parseInt(cmd.split('=')[1]);
-      if (this.state.connections[linkId]) {
-
-        if (this.state.pendingSend){
-          const pending = this.state.pendingSend;
-          this.state.pendingSend = undefined;
-          this.state.connections[linkId].write(pending.buffer, (err => {
-            if (!err) {
-              console.error("Send to TCP Client (on flush):\n", pending.buffer.trim());
-              this.state.connections[linkId].destroy();
-              this.state.connections.splice(linkId, 1);
-            }
-          }));
-
-        }else{
-            this.state.connections[linkId].destroy();
-            this.state.connections.splice(linkId, 1);
-        }
-
+      
+      if (this.tcpManager.hasConnection(linkId)) {
+        this.tcpManager.closeConnection(linkId);
         response = `\r\n${linkId},CLOSED\r\n\r\nOK\r\n`;
-      
-      
+      } else {
+        response = '\r\n\r\nERROR\r\n';
       }
     }
-
 
     if (response) console.error("Command Response:\r\n", response);
 
@@ -380,169 +415,23 @@ export class ATModemSimulator extends EventEmitter {
     this.state.cipMode = 0; //  Transmission Mode
     this.state.ssid = '';
     this.state.password = '';
-    this.state.pendingSend = undefined;
+    this.state.cipsto = 180;
     
-    this.stopTcpServer();
-    this.closeAllConnections();
-  }
-
-
-  private async startTcpServer(): Promise<boolean> {
-    if (this.tcpServer) {
-      this.tcpServer.close();
-    }
-
-    // Verifica se a porta está disponível
-    const isAvailable = await this.isPortAvailable(this.state.port);
-    if (!isAvailable) {
-      console.error(`Port ${this.state.port} is already in use`);
-      return false;
-    }
-
-    try {
-      this.tcpServer = net.createServer((socket) => {
-
-        // Encontra um slot livre para a conexão
-        let linkId = -1;
-        for (let i = 0; i < MAX_CONNECTIONS; i++) {
-          if (!this.state.connections[i]) {
-            linkId = i;
-            break;
-          }
-        }
-
-        if (linkId !== -1) {
-          
-          this.state.connections[linkId] = socket;
-
-          this.emit('data', `${linkId},CONNECT\r\n\r\n`);
-
-          socket.on('data', async (data) => {
-
-            const sendLater = true;
-
-            if(sendLater){
-
-              console.error("TCPSocket Received (%d):\r\n%s", data.length, data.toString());
-              this.emit('data', `+IPD,${linkId},${data.length}\r\n`);
-
-              if (!this.state.pendingReceive) {
-                this.state.pendingReceive = {
-                  linkId: linkId,
-                  size: data.length,
-                  buffer: data.toString()
-                };
-              }else{
-                console.warn("WARNIGN.... pendingReceive and has new request. This may be a bug");
-              }
-
-            }else{
-              const response = `+IPD,${linkId},${data.length}:${data.toString()}\r\n`;
-              this.emit('data', response);
-              console.error("Socket Received (%d): %s", data.length, data.toString());
-              console.error("Send Response: %s {....}", response);
-            }
-
-
-
-          });
-
-          socket.on('close', () => {
-            this.state.connections.splice(linkId, 1);
-            console.log('Conexão encerrada....');
-            //this.emit('data', `${linkId},CLOSED\r\n`);
-          });
-
-          socket.on('error', () => {
-            this.state.connections.splice(linkId, 1);
-          });
-        } else {
-          socket.destroy();
-        }
-      });
-
-      // Configura handler de erro
-      this.tcpServer.on('error', (err: any) => {
-        console.error('TCP server error:', err);
-        this.state.cipServer = 0;
-        this.tcpServer = null;
-      });
-
-      this.tcpServer.listen(this.state.port, () => {
-        console.log(`TCP server listening on port ${this.state.port}`);
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Failed to create TCP server:', error);
-      return false;
-    }
-  }
-
-  private async isPortAvailable(port: number): Promise<boolean> {
-    return new Promise((resolve) => {
-      const server = net.createServer();
-      
-      server.listen(port, () => {
-        server.close(() => {
-          resolve(true);
-        });
-      });
-
-      server.on('error', () => {
-        resolve(false);
-      });
-    });
-  }
-
-  private stopTcpServer(): void {
-    if (this.tcpServer) {
-      this.tcpServer.close();
-      this.tcpServer = null;
-    }
-    this.closeAllConnections();
-  }
-
-  private closeAllConnections(): void {
-    for (let i = 0; i < MAX_CONNECTIONS; i++) {
-      if (this.state.connections[i]) {
-        this.state.connections[i].destroy(); // fire close event
-      }
-    }
+    this.tcpManager.stopServer();
+    this.tcpManager.closeAllConnections();
   }
 
   public handlePendingSend(linkId: number, data: string): string | null {
-    if (!this.state.pendingSend) {
-      return null;
-    }
+    return this.tcpManager.handlePendingSend(linkId, data);
+  }
 
-    const pending = this.state.pendingSend;
-    
-    console.error("CIPSEND - Received data [length:%d, expected:%d]:\r\n%s", 
-      data.length, pending.pkgSize, data);
-
-    // Store the complete data (SerialPortInterface already handles size limits)
-    pending.buffer = data;
-    pending.received = data.length;
-
-    // Send data to TCP connection
-    if (this.state.connections[linkId]) {
-      this.state.connections[linkId].write(data, (err) => {
-        if (!err) {
-          console.error("Send to TCP Client:\n", data.trim());
-        }
-      });
-    }
-
-    // Clear pending send state
-    this.state.pendingSend = undefined;
-
-    return `\r\nRecv ${data.length} bytes\r\n\r\nSEND OK\r\n`;
+  public handlePendingSendBuffer(linkId: number, data: Buffer): string | null {
+    return this.tcpManager.handlePendingSendBuffer(linkId, data);
   }
 
   public sendData(linkId: number, data: string): void {
-    if (this.state.connections[linkId]) {
-      this.state.connections[linkId].write(data);
+    const sent = this.tcpManager.sendData(linkId, data);
+    if (sent) {
       this.emit('data', `\r\nRecv ${data.length} bytes\r\n`);
       this.emit('data', 'SEND OK\r\n');
     }
@@ -550,5 +439,24 @@ export class ATModemSimulator extends EventEmitter {
 
   public getState(): ModemState {
     return { ...this.state };
+  }
+
+  private setupTCPManagerEvents(): void {
+    this.tcpManager.on('serverConnectionEstablished', (linkId: number) => {
+      this.emit('data', `${linkId},CONNECT\r\n\r\n`);
+    });
+
+    this.tcpManager.on('dataReceived', (linkId: number, dataLength: number) => {
+      console.error(`+IPD,${linkId},${dataLength} - Socket Received data`);
+      this.emit('data', `+IPD,${linkId},${dataLength}\r\n`);
+    });
+
+    this.tcpManager.on('connectionClosed', (linkId: number) => {
+      this.emit('data', `${linkId},CLOSED\r\n`);
+    });
+
+    this.tcpManager.on('connectionError', (linkId: number, error: Error) => {
+      this.emit('data', `${linkId},CLOSED\r\n`);
+    });
   }
 }

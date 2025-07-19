@@ -60,7 +60,7 @@ export class SerialPortInterface {
 
     // Single handler for all serial data
     this.serialPort.on('data', (data: Buffer) => {
-      console.error("Serial data received: %d bytes, rawMode: %s", data.length, this.rawDataMode);
+      // console.error("Serial data received: %d bytes, rawMode: %s", data.length, this.rawDataMode);
       if (this.rawDataMode) {
         this.handleRawData(data);
       } else {
@@ -75,7 +75,6 @@ export class SerialPortInterface {
     });
 
     this.modem.on('waitingForData', (linkId: number, size: number) => {
-      console.error("waitingForData (%d,%d)", linkId, size);
       this.startRawDataMode(linkId, size);
     });
 
@@ -111,7 +110,7 @@ export class SerialPortInterface {
   }
 
   private startRawDataMode(linkId: number, size: number): void {
-    console.error("Starting raw data mode for linkId %d, expecting %d bytes", linkId, size);
+    console.error("Starting [RAW DATA MODE] for linkId %d, expecting %d bytes", linkId, size);
     this.rawDataMode = true;
     this.currentLinkId = linkId;
     this.expectedDataSize = size;
@@ -129,14 +128,14 @@ export class SerialPortInterface {
     );
 
     if (this.rawDataBuffer.length >= this.expectedDataSize) {
-      // Got all expected data
-      const finalData = this.rawDataBuffer.subarray(0, this.expectedDataSize).toString();
+      // Got all expected data - take exactly the expected size
+      const finalDataBuffer = this.rawDataBuffer.subarray(0, this.expectedDataSize);
       const remainingData = this.rawDataBuffer.subarray(this.expectedDataSize);
       
-      console.error("Raw data complete, processing %d bytes", finalData.length);
+      console.error("Raw data complete, processing %d bytes", this.expectedDataSize);
       
-      // Process the complete data packet
-      const resp = this.modem.handlePendingSend(this.currentLinkId, finalData);
+      // Process the complete data packet - pass Buffer directly
+      const resp = this.modem.handlePendingSendBuffer(this.currentLinkId, finalDataBuffer);
       if (resp && this.serialPort) {
         this.serialPort.write(resp);
       }
