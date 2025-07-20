@@ -60,6 +60,11 @@ export class ATModemSimulator extends EventEmitter {
       response = '\r\n\r\nOK\r\n';
     }
 
+    // Debug Comands....
+    if (cmd === 'DEBUG:') {
+      response = '';
+    }
+
     // Reset do modem
     else if (cmd === 'AT+RST') {
       response = '\r\n\r\nOK\r\n';
@@ -275,7 +280,7 @@ export class ATModemSimulator extends EventEmitter {
         console.error("DEBUG: Send [size: %d]:\r\n%s", result.actualLen, Utils.hexDump(result.data));
       } else {
         console.error("Send DONE... Response: +CIPRECVDATA:0... ");
-        response = '+CIPRECVDATA:0,192.168.0.2,8080,\r\nOK\r\n';
+        response = '\r\n+CIPRECVDATA:0:\r\n\r\nOK\r\n';
       }
     }
 
@@ -381,7 +386,7 @@ export class ATModemSimulator extends EventEmitter {
 
       if (this.tcpManager.hasConnection(linkId)) {
         this.tcpManager.setPendingSend(linkId, size);
-        this.emit('waitingForData', linkId, size);
+        this.emit('startRawDataMode', linkId, size);
         response = '\r\nOK\r\n> ';
       } else {
         console.error("ERROR: No connection at linkId:" + linkId);
@@ -421,7 +426,7 @@ export class ATModemSimulator extends EventEmitter {
     this.tcpManager.closeAllConnections();
   }
 
-  public handlePendingSend(linkId: number, data: string): string | null {
+  public handlePendingSend(linkId: number, data: Buffer): string | null {
     return this.tcpManager.handlePendingSend(linkId, data);
   }
 
@@ -458,5 +463,6 @@ export class ATModemSimulator extends EventEmitter {
     this.tcpManager.on('connectionError', (linkId: number, error: Error) => {
       this.emit('data', `${linkId},CLOSED\r\n`);
     });
+
   }
 }

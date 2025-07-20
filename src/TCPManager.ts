@@ -318,7 +318,7 @@ export class TCPManager extends EventEmitter {
     console.error(`[handleSocketData] ${connection.role} connection ${linkId} received (${data.length}):`);
     console.error(Utils.hexDump(data));
     
-    // Check for MQTT PING packets for debugging
+    // Check for MQTT PING packets for debugging and special handling
     if (data.length === 2) {
       if (data[0] === 0xc0 && data[1] === 0x00) {
         console.error(`[MQTT DEBUG] PINGREQ detected on connection ${linkId}`);
@@ -326,6 +326,7 @@ export class TCPManager extends EventEmitter {
         console.error(`[MQTT DEBUG] PINGRESP detected on connection ${linkId}`);
       }
     }
+    
     
     if (!connection.pendingReceive) {
       connection.pendingReceive = {
@@ -427,7 +428,7 @@ export class TCPManager extends EventEmitter {
     }
   }
 
-  public handlePendingSend(linkId: number, data: string): string | null {
+  public handlePendingSend(linkId: number, data: Buffer): string | null {
     const connection = this.connections.get(linkId);
     if (!connection || !connection.pendingSend) {
       return null;
@@ -438,12 +439,21 @@ export class TCPManager extends EventEmitter {
     console.error(`CIPSEND - Connection ${linkId} received data [length:${data.length}, expected:${pending.pkgSize}]:`);
     console.error(Utils.hexDump(data));
 
-    // Store the complete data - convert string to Buffer using latin1
-    pending.buffer = Buffer.from(data, 'latin1');
+    // Check for MQTT PING packets
+    if (data.length === 2) {
+      if (data[0] === 0xc0 && data[1] === 0x00) {
+        console.error(`[MQTT DEBUG] PINGREQ being sent from client on connection ${linkId}`);
+      } else if (data[0] === 0xd0 && data[1] === 0x00) {
+        console.error(`[MQTT DEBUG] PINGRESP being sent from client on connection ${linkId}`);
+      }
+    }
+
+    // Store the complete data as Buffer
+    pending.buffer = data;
     pending.received = data.length;
 
     // Send data through socket
-    const sent = this.sendData(linkId, data);
+    const sent = this.sendDataBuffer(linkId, data);
     if (sent) {
       console.error(`Send to ${connection.role} connection ${linkId} - OK`);
     }

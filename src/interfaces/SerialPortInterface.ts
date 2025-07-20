@@ -74,7 +74,7 @@ export class SerialPortInterface {
       }
     });
 
-    this.modem.on('waitingForData', (linkId: number, size: number) => {
+    this.modem.on('startRawDataMode', (linkId: number, size: number) => {
       this.startRawDataMode(linkId, size);
     });
 
