@@ -1,3 +1,8 @@
+// Copyright (c) 2025 Ricardo JL Rufino
+// 
+// This software is released under the MIT License.
+// https://opensource.org/licenses/MIT
+
 import { EventEmitter } from 'events';
 import { ModemState } from './types';
 import { MAX_CONNECTIONS, TCPManager } from './TCPManager';
@@ -49,7 +54,7 @@ export class ATModemSimulator extends EventEmitter {
     return responses.join('');
   }
 
-  private async executeCommand(cmd: string): Promise<string> {
+  private async executeCommand(cmd: string): Promise<string | null> {
     
     console.log(`Executing command: ${cmd}`);
     
@@ -275,9 +280,13 @@ export class ATModemSimulator extends EventEmitter {
       
       const result = this.tcpManager.getPendingReceiveData(linkId, requestedLen);
       if (result) {
-        response = `\r\n\r\n+CIPRECVDATA,${result.actualLen}:${result.data}\r\n` +
-                   '\r\nOK\r\n';
+        // Emit special event for binary data transmission
+        const responseHeader = Buffer.from(`\r\n\r\n+CIPRECVDATA,${result.actualLen}:`);
+        const responseTail = Buffer.from(`\r\n\r\nOK\r\n`);
+        const fullResponse = Buffer.concat([responseHeader, result.data, responseTail]);
+        this.emit('binaryResponse', fullResponse);
         console.error("DEBUG: Send [size: %d]:\r\n%s", result.actualLen, Utils.hexDump(result.data));
+        return null; 
       } else {
         console.error("Send DONE... Response: +CIPRECVDATA:0... ");
         response = '\r\n+CIPRECVDATA:0:\r\n\r\nOK\r\n';

@@ -52,6 +52,11 @@ export class WebSocketInterface {
     this.modem.on('waitingForData', (linkId, size) => {
       this.server.emit('waitingForData', { linkId, size });
     });
+
+    this.modem.on('binaryResponse', (responseBuffer: Buffer) => {
+      // Convert Buffer to base64 for WebSocket transmission
+      this.server.emit('response', responseBuffer.toString('base64'));
+    });
   }
 
   public start(): void {

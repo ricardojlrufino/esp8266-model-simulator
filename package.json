@@ -1,6 +1,6 @@
 {
     "name": "esp8266-modem-simulator",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "description": "Simulador de modem AT em TypeScript/Node.js com interfaces PIPE e WebSocket",
     "main": "dist/index.js",
     "bin": {

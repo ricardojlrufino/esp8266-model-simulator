@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+
+// Copyright (c) 2025 Ricardo JL Rufino
+// 
+// This software is released under the MIT License.
+// https://opensource.org/licenses/MIT
+
 import { ATModemSimulator } from './ATModemSimulator';
 import { PipeInterface } from './interfaces/PipeInterface';
 import { WebSocketInterface } from './interfaces/WebSocketInterface';

@@ -1,3 +1,8 @@
+// Copyright (c) 2025 Ricardo JL Rufino
+// 
+// This software is released under the MIT License.
+// https://opensource.org/licenses/MIT
+
 import * as net from 'net';
 import * as dgram from 'dgram';
 import * as tls from 'tls';
@@ -475,6 +480,15 @@ export class TCPManager extends EventEmitter {
     console.error(`CIPSEND - Connection ${linkId} received data [length:${data.length}, expected:${pending.pkgSize}]:`);
     console.error(Utils.hexDump(data));
 
+    // Check for MQTT PING packets for debugging and special handling
+    if (data.length === 2) {
+      if (data[0] === 0xc0 && data[1] === 0x00) {
+        console.error(`[MQTT DEBUG] Send PINGREQ to connection ${linkId}`);
+      } else if (data[0] === 0xd0 && data[1] === 0x00) {
+        console.error(`[MQTT DEBUG] Send PINGRESP to connection ${linkId}`);
+      }
+    }
+
     // Store the complete data as Buffer
     pending.buffer = data;
     pending.received = data.length;
@@ -513,7 +527,7 @@ export class TCPManager extends EventEmitter {
 
   
 
-  public getPendingReceiveData(linkId: number, requestedLen: number): { data: string; actualLen: number } | null {
+  public getPendingReceiveData(linkId: number, requestedLen: number): { data: Buffer; actualLen: number } | null {
     const connection = this.connections.get(linkId);
     if (!connection || !connection.pendingReceive) {
       return null;
@@ -521,7 +535,7 @@ export class TCPManager extends EventEmitter {
 
     const availableData = connection.pendingReceive.buffer;
     const actualLen = Math.min(requestedLen, availableData.length);
-    const dataToSend = availableData.subarray(0, actualLen).toString('latin1');
+    const dataToSend = availableData.subarray(0, actualLen);
     const remainingData = availableData.subarray(actualLen);
 
     if (remainingData.length > 0) {

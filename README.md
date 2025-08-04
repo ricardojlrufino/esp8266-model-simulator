@@ -1,17 +1,33 @@
 # ESP8266 AT Modem Simulator
 
-A comprehensive ESP8266 AT command modem simulator written in TypeScript/Node.js with support for multiple connection interfaces: PIPE (stdin/stdout), WebSocket, and Serial Port.
+ESP8266 AT command modem simulator written in TypeScript/Node.js with support for multiple connection interfaces:  
+ - Serial Port 
+ - PIPE (stdin/stdout) (#WIP/not_test) 
+ - WebSocket (#WIP/not_test) 
+
+This emulator was made to work together with the Arduino Simulator:  
+https://github.com/ricardojlrufino/websim-arduino  
+
+Using this library:    
+https://github.com/JAndrassy/WiFiEspAT  
+
 
 ## Features
 
-- **Complete ESP8266 AT command simulation** including WiFi, TCP, and networking commands
+- **ESP8266 AT command simulation** including WiFi, TCP, and networking commands
 - **Multiple connection interfaces**: PIPE, WebSocket, and Serial Port
-- **Real-time TCP server simulation** with multi-connection support
-- **WebSocket interface** for web-based integration
-- **Serial port interface** for hardware simulation
-- **Boot sequence simulation** including ESP8266 startup messages
+- **TCP server/client simulation** with multi-connection support
 - **WiFi connection simulation** with configurable networks
 - **TCP connection management** with up to 4 simultaneous connections
+- **SSL** with up to 4 simultaneous connections
+- **MQTT**: mqtt client support
+
+
+## Installation & Usage (NPX)
+
+- Serial
+> npx esp8266-modem-simulator serial /dev/tnt0 115200
+
 
 ## Installation from Sources
 
@@ -33,31 +49,7 @@ yarn global add file:$PWD
 
 ## Usage
 
-### PIPE Interface (Default)
-Interactive command-line interface using stdin/stdout:
-
-```bash
-# Development mode
-yarn dev pipe
-# or simply
-yarn dev
-
-# Production mode
-yarn start pipe
-```
-
-### WebSocket Interface
-WebSocket server for web-based communication (runs on port 3000):
-
-```bash
-# Development mode
-yarn dev websocket
-
-# Production mode
-yarn start websocket
-```
-
-### Serial Port Interface
+### Serial Port Interfac
 Serial port communication interface:
 
 ```bash
@@ -74,28 +66,66 @@ yarn dev serial /dev/ttyUSB0 9600
 yarn start serial /dev/ttyUSB0 115200
 ```
 
+### PIPE Interface (Default) - WIP / Not fully tested
+Interactive command-line interface using stdin/stdout:
+
+```bash
+# Development mode
+yarn dev pipe
+# or simply
+yarn dev
+
+# Production mode
+yarn start pipe
+```
+
+### WebSocket Interface  - WIP / Not fully tested
+WebSocket server for web-based communication (runs on port 3000):
+
+```bash
+# Development mode
+yarn dev websocket
+
+# Production mode
+yarn start websocket
+```
+
+
 ## Supported AT Commands
 
 ### Basic Commands
 - `AT` - Test command
 - `AT+RST` - Reset module with boot sequence simulation
 - `AT+GMR` - Get firmware version
+- `ATE0/ATE1` - Configure AT command echoing
 
-### WiFi Commands
-- `AT+CWMODE=<mode>` - Set WiFi mode (0-3)
+### WiFi Commands (fake/mock)
+- `AT+CWMODE=<mode>` - Set WiFi mode (0-3: null mode, station, AP, station+AP)
 - `AT+CWMODE?` - Query WiFi mode
 - `AT+CWDHCP=<mode>,<en>` - Configure DHCP
 - `AT+CWLAP` - List available access points
 - `AT+CWJAP="<ssid>","<password>"` - Connect to WiFi network
 - `AT+CIFSR` - Get IP and MAC address
+- `AT+CIPSTA?` - Query station IP information
 
-### TCP/IP Commands
+### TCP/IP Connection Management
 - `AT+CIPMUX=<mode>` - Configure multiple connections (0/1)
 - `AT+CIPMUX?` - Query multiple connection mode
 - `AT+CIPSERVER=<mode>[,<port>]` - Configure TCP server
-- `AT+CIPSTATUS` - Get connection status
-- `AT+CIPSEND=<link_id>,<length>` - Send data
-- `AT+CIPCLOSE=<link_id>` - Close connection
+- `AT+CIPSTATUS` - Get connection status for all links
+- `AT+CIPSTART=<link_id>,"<type>","<remote_IP>",<remote_port>[,<TCP_keep_alive>][,<local_IP>]` - Establish TCP/UDP/SSL connection
+- `AT+CIPCLOSE=<link_id>` - Close specific connection
+
+### Data Transmission
+- `AT+CIPSEND=<link_id>,<length>` - Send data to connection
+- `AT+CIPRECVMODE=1` - Set socket to passive receiving mode
+- `AT+CIPRECVLEN?` - Get socket data length in passive mode
+- `AT+CIPRECVDATA=<link_id>,<len>` - Obtain socket data in passive mode
+
+### Server Configuration
+- `AT+CIPSERVERMAXCONN=<num> (fake)` - Set maximum server connections
+- `AT+CIPSTO=<time>` - Set server timeout (0-7200 seconds)
+- `AT+CIPSTO?` - Query server timeout
 
 ## Default Network Configuration
 
@@ -104,51 +134,6 @@ The simulator includes a pre-configured test network:
 - **Password**: `123456`
 - **IP Address**: `127.0.0.1`
 - **MAC Address**: `11:22:33:44:55:66`
-
-## Connection Interfaces
-
-### PipeInterface
-- Uses Node.js readline for interactive command input
-- Outputs responses directly to stdout
-- Ideal for command-line testing and debugging
-
-### WebSocketInterface
-- Socket.IO server on port 3000
-- CORS enabled for cross-origin requests
-- Events: `command`, `response`, `sendData`, `getState`, `waitingForData`
-- Perfect for web applications and browser-based tools
-
-### SerialPortInterface
-- Real serial port communication using the `serialport` library
-- Configurable baud rate (default: 115200)
-- Automatic port discovery and listing
-- Hardware-compatible for embedded system testing
-
-## API
-
-### ATModemSimulator Class
-
-The core simulator class that processes AT commands and manages state:
-
-```typescript
-const simulator = new ATModemSimulator();
-
-// Process AT command
-const response = simulator.processCommand('AT\r\n');
-
-// Send data to TCP connection
-simulator.sendData(linkId, data);
-
-// Get current state
-const state = simulator.getState();
-```
-
-### Events
-
-The simulator emits the following events:
-
-- `data` - Asynchronous responses (boot messages, connection status)
-- `waitingForData` - When simulator is waiting for data input after CIPSEND
 
 ## TCP Server Simulation
 
@@ -202,33 +187,11 @@ OK
 - **socket.io** for WebSocket interface
 - **serialport** for Serial Port interface
 
-## Development
-
-```bash
-# Install dependencies
-yarn install
-
-# Development mode with auto-reload
-yarn dev [interface] [options]
-
-# Build TypeScript
-yarn build
-
-# Run built version
-yarn start [interface] [options]
-```
 
 ## License
 
 MIT License - see LICENSE file for details.
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
 
 ## Troubleshooting
 
@@ -240,16 +203,7 @@ MIT License - see LICENSE file for details.
   ```
 - Restart your session after group changes
 
-### WebSocket Connection Issues
-- Check that port 3000 is not in use by another application
-- Verify firewall settings allow connections on port 3000
-
-### Common AT Command Issues
-- Ensure commands end with `\r\n`
-- WiFi connection only works with the pre-configured network (`rede1`/`123456`)
-- TCP server requires `CIPMUX=1` to be set first
-
-## Debug
+## Debug Serial Connections
 
 Use socat and tty0tty to debug real esp hardware 
 
@@ -257,10 +211,10 @@ socat -x -v /dev/ttyUSB0,raw,echo=0,b115200 \
             /dev/tnt0,raw,echo=0,b115200 \
             2>&1 | tee -a serial_traffic_mqtt.log
 
-Debug simulator
+**Debug simulator**
 
-start simulator on /dev/tnt0
-connect websim in /dev/tnt3
+start simulator on `/dev/tnt0`
+connect websim in `/dev/tnt3`
 
 socat -x -v /dev/tnt1,raw,echo=0,b115200 \
             /dev/tnt2,raw,echo=0,b115200 \

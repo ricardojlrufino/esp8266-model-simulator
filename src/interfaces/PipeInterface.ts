@@ -35,6 +35,10 @@ export class PipeInterface {
         }
       });
     });
+
+    this.modem.on('binaryResponse', (responseBuffer: Buffer) => {
+      process.stdout.write(responseBuffer);
+    });
   }
 
   public start(): void {

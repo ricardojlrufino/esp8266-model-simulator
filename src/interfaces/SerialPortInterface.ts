@@ -78,6 +78,13 @@ export class SerialPortInterface {
       this.startRawDataMode(linkId, size);
     });
 
+    this.modem.on('binaryResponse', (responseBuffer: Buffer) => {
+      if (this.serialPort) {
+        // Send the complete response as binary data (preserves exact byte values)
+        this.serialPort.write(responseBuffer);
+      }
+    });
+
     this.serialPort.on('error', (error) => {
       console.error('Serial port error:', error);
     });
@@ -100,7 +107,7 @@ export class SerialPortInterface {
     // Process complete lines
     for (const line of lines) {
       if (line.trim()) {
-        console.error("Processing command: %s", line.trim());
+        // console.error("Processing command: %s", line.trim());
         const response = await this.modem.processCommand(line + '\n');
         if (response && this.serialPort) {
           this.serialPort.write(response);
